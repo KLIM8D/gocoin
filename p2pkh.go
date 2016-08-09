@@ -36,7 +36,7 @@ import (
 	"errors"
 	"sort"
 
-	"github.com/StorjPlatform/gocoin/base58check"
+	"github.com/KLIM8D/gocoin/base58check"
 )
 
 //Amounts represents amount of bitcoin of address
@@ -60,13 +60,13 @@ func createP2PKHScriptPubkey(publicKeyBase58 string) ([]byte, error) {
 	scriptPubKey.Write(publicKeyBytes)
 	scriptPubKey.WriteByte(opEQUALVERIFY)
 	scriptPubKey.WriteByte(opCHECKSIG)
+
 	script := scriptPubKey.Bytes()
 	return script, nil
 }
 
 //CreateStandardScript creates standard scriptsig and fills TXin.Script.
 func createP2PKHScriptSig(rawTransactionHashed []byte, key *Key) ([]byte, error) {
-
 	publicKeyBytes := key.Pub.key.SerializeUncompressed()
 
 	//Sign the raw transaction
@@ -109,27 +109,31 @@ func setupP2PKHTXin(keys []*Key, totalAmount uint64, service Service) ([]*TXin, 
 	var amount uint64
 	for i := range utxos {
 		utxo := utxos[len(utxos)-1-i]
-		logging.Println("using utxo", utxo.Addr, hex.EncodeToString(utxo.Hash),utxo.Key)
-		txin := TXin{}
-		txin.Hash = utxo.Hash
-		txin.Index = utxo.Index
-		txin.Sequence = uint32(0xffffffff)
-		txin.PrevScriptPubkey = utxo.Script
-		txin.CreateScriptSig = func(rawTransaction []byte) ([]byte, error) {
-			return createP2PKHScriptSig(rawTransaction, utxo.Key)
+		logging.Println("using utxo", utxo.Addr, hex.EncodeToString(utxo.Hash), utxo.Key)
+		txin := TXin{
+			Hash:             utxo.Hash,
+			Index:            utxo.Index,
+			Sequence:         uint32(0xffffffff),
+			PrevScriptPubkey: utxo.Script,
+			CreateScriptSig: func(rawTransaction []byte) ([]byte, error) {
+				return createP2PKHScriptSig(rawTransaction, utxo.Key)
+			},
 		}
+
 		txins = append(txins, &txin)
 		if amount += utxo.Amount; amount >= totalAmount {
 			return txins, amount - totalAmount, nil
 		}
 	}
+
 	return nil, amount - totalAmount, errors.New("not enough coin")
 }
 
 func setupP2PKHTXout(amounts []*Amounts) ([]*TXout, error) {
-	txouts := make([]*TXout, len(amounts))
 	var err error
 	var i int
+
+	txouts := make([]*TXout, len(amounts))
 	for _, amount := range amounts {
 		txouts[i] = &TXout{}
 		txouts[i].Value = amount.Amount
@@ -139,6 +143,7 @@ func setupP2PKHTXout(amounts []*Amounts) ([]*TXout, error) {
 		}
 		i++
 	}
+
 	return txouts, nil
 }
 
@@ -146,13 +151,16 @@ func setupP2PKHTXout(amounts []*Amounts) ([]*TXout, error) {
 func Pay(keys []*Key, addresses []*Amounts, service Service) ([]byte, error) {
 	var err error
 	var totalAmount uint64
+	var rawtx []byte
+	var kb uint64 = 1
+	tx := TX{
+		Locktime: 0,
+	}
+
 	for _, amount := range addresses {
 		totalAmount += amount.Amount
 	}
-	var rawtx []byte
-	tx := TX{}
-	tx.Locktime = 0
-	var kb uint64 = 1
+
 	for {
 		var remain uint64
 
@@ -161,10 +169,12 @@ func Pay(keys []*Key, addresses []*Amounts, service Service) ([]byte, error) {
 			logging.Println(err)
 			return nil, err
 		}
+
 		a := make([]*Amounts, len(addresses))
 		for i, addr := range addresses {
 			a[i] = addr
 		}
+
 		if remain != 0 {
 			adr, _ := keys[0].Pub.GetAddress()
 			exist := false
@@ -179,25 +189,28 @@ func Pay(keys []*Key, addresses []*Amounts, service Service) ([]byte, error) {
 				a = append(a, &Amounts{adr, remain})
 			}
 		}
+
 		tx.Txout, err = setupP2PKHTXout(a)
 		if err != nil {
 			return nil, err
 		}
+
 		rawtx, err = tx.MakeTX()
 		if err != nil {
 			return nil, err
 		}
+
 		logging.Println("size", len(rawtx))
 		if uint64(len(rawtx)) < 1024*kb {
 			break
 		}
+
 		kb = uint64(len(rawtx)/1024) + 1
 		logging.Println("regenerating tx for new fee", DefaultFee*kb)
 	}
-	logging.Println("fee", DefaultFee*kb)
 
-	var txHash []byte
-	txHash, err = service.SendTX(rawtx)
+	logging.Println("fee", DefaultFee*kb)
+	txHash, err := service.SendTX(rawtx)
 	if err != nil {
 		return nil, err
 	}
@@ -205,5 +218,6 @@ func Pay(keys []*Key, addresses []*Amounts, service Service) ([]byte, error) {
 		SetUTXOSpent(txin.Hash)
 	}
 	logging.Println("tx hash", hex.EncodeToString(txHash))
+
 	return txHash, nil
 }

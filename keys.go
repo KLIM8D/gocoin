@@ -37,8 +37,8 @@ import (
 	"log"
 	"os"
 
-	"github.com/StorjPlatform/gocoin/base58check"
-	"github.com/StorjPlatform/gocoin/btcec"
+	"github.com/KLIM8D/gocoin/base58check"
+	"github.com/btcsuite/btcd/btcec"
 	"golang.org/x/crypto/ripemd160"
 )
 
@@ -106,23 +106,30 @@ func GetPublicKey(pubKeyByte []byte, isTestnet bool) (*PublicKey, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	return &PublicKey{key: key, isTestnet: isTestnet}, nil
 }
 
 //GetKeyFromWIF gets PublicKey and PrivateKey from private key of WIF format.
 func GetKeyFromWIF(wif string) (*Key, error) {
 	secp256k1 := btcec.S256()
-	privateKeyBytes, isCmpressed, err := base58check.Decode(wif)
+	privateKeyBytes, isCompressed, err := base58check.Decode(wif)
 	if err != nil {
 		return nil, err
 	}
 
-	pub := PublicKey{}
+	pub := PublicKey{
+		isCompressed: isCompressed,
+	}
 	priv := PrivateKey{}
+
+	//Get the raw public
+	priv.key, pub.key = btcec.PrivKeyFromBytes(secp256k1, privateKeyBytes[1:])
 	key := Key{
 		Pub:  &pub,
 		Priv: &priv,
 	}
+
 	switch privateKeyBytes[0] {
 	case 0xef:
 		pub.isTestnet = true
@@ -133,42 +140,32 @@ func GetKeyFromWIF(wif string) (*Key, error) {
 	default:
 		return nil, errors.New("cannot determin net param from private key")
 	}
-	pub.isCompressed = isCmpressed
-
-	//Get the raw public
-	priv.key, pub.key = btcec.PrivKeyFromBytes(secp256k1, privateKeyBytes[1:])
 
 	return &key, nil
-
 }
 
 //GenerateKey generates random PublicKey and PrivateKey.
 func GenerateKey(flagTestnet bool) (*Key, error) {
 	seed := make([]byte, 32)
-	_, err := rand.Read(seed)
-	if err != nil {
+	if _, err := rand.Read(seed); err != nil {
 		return nil, err
 	}
 	s256 := btcec.S256()
 
-	private := PrivateKey{}
-	private.isTestnet = flagTestnet
-	public := PublicKey{}
-	public.isTestnet = flagTestnet
-	private.key, public.key = btcec.PrivKeyFromBytes(s256, seed)
-	key := Key{
-		Pub:  &public,
-		Priv: &private,
+	private := &PrivateKey{
+		isTestnet: flagTestnet,
+	}
+	public := &PublicKey{
+		isTestnet: flagTestnet,
 	}
 
-	//Print the keys
-	logging.Println("Your private key in WIF is")
-	logging.Println(private.GetWIFAddress())
+	private.key, public.key = btcec.PrivKeyFromBytes(s256, seed)
+	key := &Key{
+		Pub:  public,
+		Priv: private,
+	}
 
-	logging.Println("Your address is")
-	logging.Println(public.GetAddress())
-
-	return &key, nil
+	return key, nil
 }
 
 //Sign sign data.
@@ -177,6 +174,7 @@ func (priv *PrivateKey) Sign(hash []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	return sig.Serialize(), nil
 }
 
@@ -194,6 +192,7 @@ func (key *Key) SignMessage(hash []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	return sig, nil
 }
 
@@ -212,7 +211,6 @@ func (priv *PrivateKey) GetWIFAddress() string {
 //GetAddress returns bitcoin address from PublicKey
 func (pub *PublicKey) GetAddress() (string, []byte) {
 	var publicKeyPrefix byte
-
 	if pub.isTestnet {
 		publicKeyPrefix = 0x6F
 	} else {
@@ -224,7 +222,6 @@ func (pub *PublicKey) GetAddress() (string, []byte) {
 	var shadPublicKeyBytes [32]byte
 	if pub.isCompressed {
 		shadPublicKeyBytes = sha256.Sum256(pub.key.SerializeCompressed())
-
 	} else {
 		shadPublicKeyBytes = sha256.Sum256(pub.key.SerializeUncompressed())
 	}
@@ -252,5 +249,4 @@ func IsTestnet(addr string) (bool, error) {
 	default:
 		return false, errors.New("invalid address")
 	}
-
 }

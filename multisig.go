@@ -43,8 +43,8 @@ import (
 
 	"golang.org/x/crypto/ripemd160"
 
-	"github.com/StorjPlatform/gocoin/base58check"
-	"github.com/StorjPlatform/gocoin/btcec"
+	"github.com/KLIM8D/gocoin/base58check"
+	"github.com/btcsuite/btcd/btcec"
 )
 
 //RedeemScript represents Redeem script for M of N multisig transaction.
@@ -59,6 +59,7 @@ func (rs *RedeemScript) getHash() []byte {
 	shadPublicKeyBytes := sha256.Sum256(rs.Script)
 	ripeHash := ripemd160.New()
 	ripeHash.Write(shadPublicKeyBytes[:])
+
 	return ripeHash.Sum(nil)
 }
 
@@ -66,12 +67,12 @@ func (rs *RedeemScript) getHash() []byte {
 func (rs *RedeemScript) GetAddress() string {
 	//Get P2SH address by base58 encoding with P2SH prefix 0x05
 	var prefix byte
-
 	if rs.PublicKeys[0].isTestnet {
 		prefix = 0xc4
 	} else {
 		prefix = 0x5
 	}
+
 	return base58check.Encode(prefix, rs.getHash())
 }
 
@@ -85,15 +86,17 @@ func (rs *RedeemScript) createSriptPubkey() []byte {
 	scriptPubKey.WriteByte(byte(len(redeemScriptHash))) //PUSH
 	scriptPubKey.Write(redeemScriptHash)
 	scriptPubKey.WriteByte(opEQUAL)
+
 	return scriptPubKey.Bytes()
 }
 
 // NewRedeemScript creates a M-of-N Multisig redeem script given m, n and n public keys
 //and return RedeemScript struct.
 func NewRedeemScript(m int, publicKeys []*PublicKey) (*RedeemScript, error) {
-	rs := RedeemScript{}
-	rs.M = m
-	rs.PublicKeys = publicKeys
+	rs := RedeemScript{
+		M:          m,
+		PublicKeys: publicKeys,
+	}
 	n := len(publicKeys)
 	//Check we have valid numbers for M and N
 	if n < 1 || n > 7 {
@@ -102,6 +105,7 @@ func NewRedeemScript(m int, publicKeys []*PublicKey) (*RedeemScript, error) {
 	if m < 1 || m > n {
 		return nil, errors.New("M must be between 1 and N (inclusive).")
 	}
+
 	isTestnet := publicKeys[0].isTestnet
 	for _, pk := range publicKeys {
 		if pk.isTestnet != isTestnet {
@@ -125,27 +129,36 @@ func NewRedeemScript(m int, publicKeys []*PublicKey) (*RedeemScript, error) {
 	redeemScript.WriteByte(byte(nOPCode)) //n
 	redeemScript.WriteByte(byte(opCHECKMULTISIG))
 	rs.Script = redeemScript.Bytes()
+
 	return &rs, nil
 }
 
 // CreateScriptSig signs a raw transaction with keys.
 func (rs *RedeemScript) createScriptSig(rawTransactionHashed []byte, signs [][]byte) ([]byte, error) {
-
 	//Verify that it worked.
 	secp256k1 := btcec.S256()
 	count := 0
+	//Create scriptSig
+	var buffer bytes.Buffer
+	buffer.WriteByte(op0) //OP_0 for Multisig off-by-one error
+
 	for i, signature := range signs {
 		if signature == nil {
 			continue
 		}
+
 		count++
-		sig, err := btcec.ParseSignature(signature, secp256k1)
-		if err != nil {
+		if sig, err := btcec.ParseSignature(signature, secp256k1); err != nil {
 			return nil, err
-		}
-		valid := sig.Verify(rawTransactionHashed, rs.PublicKeys[i].key)
-		if !valid {
-			return nil, fmt.Errorf("number %d of signature is invalid", i)
+		} else {
+			valid := sig.Verify(rawTransactionHashed, rs.PublicKeys[i].key)
+			if !valid {
+				return nil, fmt.Errorf("number %d of signature is invalid", i)
+			}
+
+			buffer.WriteByte(byte(len(signature) + 1)) //PUSH each signature. Add one for hash type byte
+			buffer.Write(signature)                    //Signature bytes
+			buffer.WriteByte(0x1)                      //Hash type
 		}
 	}
 
@@ -153,39 +166,35 @@ func (rs *RedeemScript) createScriptSig(rawTransactionHashed []byte, signs [][]b
 		return nil, fmt.Errorf("number of signatures %d must be %d", count, rs.M)
 	}
 
-	//redeemScript length. To allow redeemScript > 255 bytes, we use OP_PUSHDATA2 and use two bytes to specify length
+	//redeemScript length. To allow redeemScript > 255 bytes, we use OP_PUSHDATA2 and
+	//use two bytes to specify length
 	var redeemScriptLengthBytes []byte
 	var requiredPUSHDATA byte
 	if len(rs.Script) < 255 {
-		requiredPUSHDATA = opPUSHDATA1 //OP_PUSHDATA1 specifies next *one byte* will be length to be pushed to stack
+		//OP_PUSHDATA1 specifies next *one byte* will be length to be pushed to stack
+		requiredPUSHDATA = opPUSHDATA1
 		redeemScriptLengthBytes = []byte{byte(len(rs.Script))}
 	} else {
-		requiredPUSHDATA = opPUSHDATA2 //OP_PUSHDATA2 specifies next *two bytes* will be length to be pushed to stack
+		//OP_PUSHDATA2 specifies next *two bytes* will be length to be pushed to stack
+		requiredPUSHDATA = opPUSHDATA2
 		redeemScriptLengthBytes = make([]byte, 2)
 		binary.LittleEndian.PutUint16(redeemScriptLengthBytes, uint16(len(rs.Script)))
 	}
-	//Create scriptSig
-	var buffer bytes.Buffer
-	buffer.WriteByte(op0) //OP_0 for Multisig off-by-one error
-	for _, signature := range signs {
-		if signature == nil {
-			continue
-		}
-		buffer.WriteByte(byte(len(signature) + 1)) //PUSH each signature. Add one for hash type byte
-		buffer.Write(signature)                    // Signature bytes
-		buffer.WriteByte(0x1)                      //hash type
-	}
+
 	buffer.WriteByte(requiredPUSHDATA)    //OP_PUSHDATA1 or OP_PUSHDATA2 depending on size of redeemScript
 	buffer.Write(redeemScriptLengthBytes) //PUSH redeemScript
 	buffer.Write(rs.Script)               //redeemScript
+
 	return buffer.Bytes(), nil
 }
 
 func (rs *RedeemScript) getMultisigTX(keys []*Key, amount uint64, service Service) (*TX, error) {
 	var err error
-	tx := TX{}
-	tx.Locktime = 0
 	var remain uint64
+
+	tx := &TX{
+		Locktime: 0,
+	}
 	tx.Txin, remain, err = setupP2PKHTXin(keys, amount+DefaultFee, service)
 	if err != nil {
 		return nil, err
@@ -197,36 +206,45 @@ func (rs *RedeemScript) getMultisigTX(keys []*Key, amount uint64, service Servic
 		return nil, err
 	}
 
-	txout := TXout{}
-	txout.Value = amount
-	txout.ScriptPubkey = rs.createSriptPubkey()
-	tx.Txout = append(tx.Txout, &txout)
+	txout := &TXout{
+		Value:        amount,
+		ScriptPubkey: rs.createSriptPubkey(),
+	}
+	tx.Txout = append(tx.Txout, txout)
 
-	return &tx, nil
+	return tx, nil
 }
 
 //Pay pays to a fund.
 func (rs *RedeemScript) Pay(keys []*Key, amount uint64, service Service) ([]byte, error) {
 	tx, err := rs.getMultisigTX(keys, amount, service)
+	if err != nil {
+		return nil, err
+	}
+
 	rawtx, err := tx.MakeTX()
 	if err != nil {
 		return nil, err
 	}
+
 	txHash, err := service.SendTX(rawtx)
 	if err != nil {
 		return nil, err
 	}
+
 	for _, txin := range tx.Txin {
 		SetUTXOSpent(txin.Hash)
 	}
 	logging.Println("tx hash", hex.EncodeToString(txHash))
+
 	return txHash, nil
 }
 
 //CreateRawTransactionHashed returns a hash of raw transaction for signing.
 func (rs *RedeemScript) CreateRawTransactionHashed(addresses []*Amounts, service Service) ([]byte, *TX, error) {
-	tx := TX{}
-	tx.Locktime = 0
+	tx := TX{
+		Locktime: 0,
+	}
 
 	var totalAmount uint64
 	for _, amount := range addresses {
@@ -245,13 +263,14 @@ func (rs *RedeemScript) CreateRawTransactionHashed(addresses []*Amounts, service
 	if utxo == nil {
 		return nil, nil, errors.New("no utxo contains sufficient coin")
 	}
-	txin := TXin{}
-	txin.Hash = utxo.Hash
-	txin.Index = utxo.Index
-	txin.Sequence = uint32(0xffffffff)
-	txin.PrevScriptPubkey = rs.Script
-	tx.Txin = []*TXin{&txin}
 
+	txin := &TXin{
+		Hash:             utxo.Hash,
+		Index:            utxo.Index,
+		Sequence:         uint32(0xffffffff),
+		PrevScriptPubkey: rs.Script,
+	}
+	tx.Txin = []*TXin{txin}
 	tx.Txout, err = setupP2PKHTXout(addresses)
 	if err != nil {
 		return nil, nil, err
@@ -265,14 +284,17 @@ func (rs *RedeemScript) Spend(tx *TX, signs [][]byte, service Service) ([]byte, 
 	tx.Txin[0].CreateScriptSig = func(rawTransaction []byte) ([]byte, error) {
 		return rs.createScriptSig(rawTransaction, signs)
 	}
+
 	rawtx, err := tx.MakeTX()
 	if err != nil {
 		return nil, err
 	}
+
 	txHash, err := service.SendTX(rawtx)
 	if err != nil {
 		return nil, err
 	}
 	logging.Println("tx hash", hex.EncodeToString(txHash))
+
 	return txHash, nil
 }

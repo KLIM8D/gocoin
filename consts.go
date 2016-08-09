@@ -150,7 +150,7 @@ const (
 	op16                  = byte(96)
 
 	//BTC is unit to convert BTC to satoshi
-	BTC = 100000000
+	BTC = 100000000 //100 million
 
 	//Fee for a transaction
 	DefaultFee = uint64(0.0001 * BTC) //  0.0001 BTC/kB

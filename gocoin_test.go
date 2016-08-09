@@ -33,7 +33,6 @@ import (
 	"encoding/hex"
 	"sort"
 	"testing"
-	"time"
 )
 
 func TestKeys2(t *testing.T) {
@@ -396,88 +395,4 @@ func TestMultisig(t *testing.T) {
 	if err != nil {
 		t.Errorf(err.Error())
 	}
-}
-
-func TestMicro(t *testing.T) {
-	service, err := SelectService(true)
-	if err != nil {
-		t.Errorf(err.Error())
-	}
-	wif := "928Qr9J5oAC6AYieWJ3fG3dZDjuC7BFVUqgu4GsvRVpoXiTaJJf"
-	//n3Bp1hbgtmwDtjQTpa6BnPPCA8fTymsiZy
-	txKey, err := GetKeyFromWIF(wif)
-	if err != nil {
-		t.Errorf(err.Error())
-	}
-	adr, _ := txKey.Pub.GetAddress()
-	logging.Println("address for tx=", adr)
-
-	wif2 := "92DUfNPumHzpCkKjmeqiSEDB1PU67eWbyUgYHhK9ziM7NEbqjnK"
-	//ms5repuZHtBrKRE93FdWqz8JEo6d8ikM3k
-	txKey2, err := GetKeyFromWIF(wif2)
-	if err != nil {
-		t.Errorf(err.Error())
-	}
-
-	txs, err := service.GetUTXO(adr, nil)
-	if err != nil {
-		t.Errorf(err.Error())
-	}
-	logging.Println("UTXO of ", adr)
-	for _, tx := range txs {
-		logging.Println("hash", hex.EncodeToString(tx.Hash))
-		logging.Println("amount", tx.Amount)
-		logging.Println("index", tx.Index)
-		logging.Println("script", hex.EncodeToString(tx.Script))
-	}
-
-	payer, err := NewMicropayer(txKey, txKey2.Pub, service)
-	if err != nil {
-		t.Errorf(err.Error())
-	}
-
-	payee, err := NewMicropayee(txKey2, txKey.Pub, service)
-	if err != nil {
-		t.Errorf(err.Error())
-	}
-
-	txHash, err := payer.CreateBond([]*Key{txKey}, 0.05*BTC)
-	if err != nil {
-		t.Errorf(err.Error())
-	}
-	locktime := time.Now().Add(time.Hour)
-	sign, err := payee.SignToRefund(txHash, 0.05*BTC-DefaultFee, &locktime)
-	if err != nil {
-		t.Errorf(err.Error())
-	}
-	_, err = payer.SendBond(&locktime, sign)
-	if err != nil {
-		t.Fatalf(err.Error())
-	}
-	signIP, err := payer.SignToIncrementedPayment(0.001 * BTC)
-	if err != nil {
-		t.Fatalf(err.Error())
-	}
-	logging.Println(hex.EncodeToString(signIP))
-	err = payee.IncrementPayment(0.001*BTC, signIP)
-	if err != nil {
-		t.Fatalf(err.Error())
-	}
-	signIP, err = payer.SignToIncrementedPayment(0.001 * BTC)
-	logging.Println(hex.EncodeToString(signIP))
-	if err != nil {
-		t.Fatalf(err.Error())
-	}
-	err = payee.IncrementPayment(0.001*BTC, signIP)
-	if err != nil {
-		t.Fatalf(err.Error())
-	}
-	_, err = payee.SendLastPayment()
-	if err != nil {
-		t.Fatalf(err.Error())
-	}
-	//	_, err = payer.SendRefund()
-	//	if err != nil {
-	//		t.Errorf(err.Error())
-	//	}
 }

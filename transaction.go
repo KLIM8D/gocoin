@@ -65,23 +65,24 @@ type TX struct {
 func (tx *TX) check() error {
 	if tx.Txin == nil || len(tx.Txin) == 0 {
 		return errors.New("txin must be filled")
-	}
-	if tx.Txout == nil || len(tx.Txout) == 0 {
+	} else if tx.Txout == nil || len(tx.Txout) == 0 {
 		return errors.New("txout must be filled")
 	}
+
 	for i, in := range tx.Txin {
 		if in.Hash == nil {
 			return fmt.Errorf("hash of number %d of TxIn is nil", i)
-		}
-		if in.PrevScriptPubkey == nil {
+		} else if in.PrevScriptPubkey == nil {
 			return fmt.Errorf("PrevScriptPubkey of number %d is nil", i)
 		}
 	}
+
 	for i, out := range tx.Txout {
 		if out.ScriptPubkey == nil {
 			return fmt.Errorf("ScriptPubkey of number %d of Txout is nil", i)
 		}
 	}
+
 	return nil
 }
 
@@ -93,16 +94,17 @@ func (tx *TX) MakeTX() ([]byte, error) {
 	}
 
 	for i, in := range tx.Txin {
-		rawTransactionHashed := tx.getRawTransactionHash(i)
-
 		if in.CreateScriptSig == nil {
 			return nil, errors.New("in.CreateScriptSig must be set")
 		}
+
+		rawTransactionHashed := tx.getRawTransactionHash(i)
 		in.scriptSig, err = in.CreateScriptSig(rawTransactionHashed[:])
 		if err != nil {
 			return nil, err
 		}
 	}
+
 	//Sign the raw transaction, and output it to the console.
 	finalTransaction := tx.createRawTransaction(-1)
 	finalTransactionHex := hex.EncodeToString(finalTransaction)
@@ -124,6 +126,7 @@ func (tx *TX) getTransactionHash() ([]byte, error) {
 	for i, tb := range h {
 		reversed[len(h)-i-1] = tb
 	}
+
 	return reversed, nil
 }
 
@@ -140,6 +143,7 @@ func (tx *TX) getRawTransactionHash(numSign int) []byte {
 	//Hash the raw transaction twice before the signing
 	hash := sha256.Sum256(rawTransactionWithHashCodeType)
 	h := sha256.Sum256(hash[:])
+
 	return h[:]
 }
 
@@ -186,7 +190,6 @@ func (tx *TX) createRawTransaction(numSign int) []byte {
 		//Script sig length
 		scriptSigLength := len(script)
 		buffer.Write(toVI(uint64(scriptSigLength)))
-
 		buffer.Write(script)
 
 		//sequence_no. Normally 0xFFFFFFFF.
@@ -225,21 +228,21 @@ func toVI(n uint64) []byte {
 		b := make([]byte, 1)
 		b[0] = byte(n & 0xff)
 		return b
-	}
-	if n <= uint64(0xffff) {
+	} else if n <= uint64(0xffff) {
 		b := make([]byte, 3)
 		b[0] = 0xfd
 		binary.LittleEndian.PutUint16(b[1:], uint16(n))
 		return b
-	}
-	if n <= uint64(0xffffffff) {
+	} else if n <= uint64(0xffffffff) {
 		b := make([]byte, 5)
 		b[0] = 0xfe
 		binary.LittleEndian.PutUint32(b[1:], uint32(n))
 		return b
 	}
+
 	b := make([]byte, 9)
 	b[0] = 0xff
 	binary.LittleEndian.PutUint64(b[1:], n)
+
 	return b
 }

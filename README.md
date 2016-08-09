@@ -1,12 +1,7 @@
-[![Build Status](https://travis-ci.org/CoinStorage/gocoin.svg?branch=master)](https://travis-ci.org/StorjPlatform/gocoin)
-[![GoDoc](https://godoc.org/github.com/StorjPlatform/gocoin?status.svg)](https://godoc.org/github.com/StorjPlatform/gocoin)
-[![GitHub license](https://img.shields.io/badge/license-MIT-blue.svg)](https://raw.githubusercontent.com/StorjPlatform/gocoin/master/LICENSE)
-[![Coverage Status](https://coveralls.io/repos/StorjPlatform/gocoin/badge.svg?branch=master)](https://coveralls.io/r/StorjPlatform/gocoin?branch=master)
-
-
 # GOcoin 
 
 ## Overview
+A fork of [https://github.com/utamaro/gocoin](https://github.com/utamaro/gocoin)
 
 This is a library to make bitcoin address and transactions which was initially forked from [hellobitcoin](https://github.com/prettymuchbryce/hellobitcoin),
 and added some useful features.
@@ -18,28 +13,28 @@ to make it a pure GO program.
 ## Features 
 
 1. Normaly Payment(P2PKH) supporting multi TxIns and multi TxOuts.
-2. Gethering unspent transaction outputs(UTXO) and send transactions by using [Blockr.io](http://blockr.io) WEB API.
+2. Gethering unspent transaction outputs(UTXO) and send transactions by using [Blockr.io](https://blockr.io) WEB API.
 3. M of N multisig whose codes were partially ported from https://github.com/soroushjp/go-bitcoin-multisig.
-4. Micropayment Channel
 
+## Changes
+1. Removed the "local" package btcec and changed the code to use [github.com/btcsuite/btcd/btcec](https://github.com/btcsuite/btcd/btcec)
+2. Refactored a lot of code
+3. Implements dynamic fee calculation using the API from [21.co](https://bitcoinfees.21.co/api)
 
 ## Requirements
 
 This requires
 
 * git
-* go 1.3+
+* go 1.5+
 
 
 ## Installation
 
-    $ mkdir tmp
+    $ mkdir -p tmp/{src,bin,pkg}
     $ cd tmp
-    $ mkdir src
-    $ mkdir bin
-    $ mkdir pkg
-    $ exoprt GOPATH=`pwd`
-    $ go get github.com/StorjPlatform/gocoin
+    $ export GOPATH=$(pwd)
+    $ go get github.com/klim8d/gocoin
 
 
 ## Example
@@ -110,48 +105,6 @@ func main(){
 ```
 
 
-## Micropayment Channel
-
-```go
-import gocoin
-
-func main(){
-	service := gocoin.NewBlockrService(true)
-
-	key1, _ := gocoin.GenerateKey(true) //payer
-	key2, _ := gocoin.GenerateKey(true) //payee
-
-	payer, _:= gocoin.NewMicropayer(key1, key2.Pub, service)
-	payee, _:= gocoin.NewMicropayee(key2, key1.Pub, service)
-
-	txHash, _:= payer.CreateBond([]*Key{key1}, 0.05*BTC)
-
-	locktime := time.Now().Add(time.Hour)
-	sign, _:= payee.SignToRefund(txHash, 0.05*gocoin.BTC-gocoin.Fee, uint32(locktime.Unix()))
-	payer.SendBond(uint32(locktime.Unix()), sign) //return an error if payee's sig is invalid
-
-	signIP, _:= payer.SignToIncrementedPayment(0.001 * gocoin.BTC)
-	payee.IncrementPayment(0.001*gocoin.BTC, signIP) //return an error if payer's sig is invalid
-	//more payments
-
-	payee.SendLastPayment()
-	//or
-	//	payer.SendRefund() after locktime
-
-}
-```
-
-Note:
-
-payer.SendRefund() must be called after locktime.
-
-http://chimera.labs.oreilly.com/books/1234000001802/ch05.html#tx_propagation
-
->Transactions with locktime specifying a future block or time must be held by the originating system
->and transmitted to the bitcoin network only after they become valid.
-
-
 # Contribution
 Improvements to the codebase and pull requests are encouraged.
-
 

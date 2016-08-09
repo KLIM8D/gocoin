@@ -37,7 +37,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"io/ioutil"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -90,7 +89,6 @@ func (b *BlockrService) GetServiceName() string {
 //SendTX send a transaction using Blockr.io.
 func (b *BlockrService) SendTX(data []byte) ([]byte, error) {
 	var btc string
-
 	if b.isTestnet {
 		btc = "tbtc"
 	} else {
@@ -102,21 +100,17 @@ func (b *BlockrService) SendTX(data []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
-	body, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-	logging.Println(string(body))
+
 	var u sendtx
-	err = json.Unmarshal(body, &u)
-	if err != nil {
+	defer resp.Body.Close()
+	if err = json.NewDecoder(resp.Body).Decode(&u); err != nil {
 		return nil, err
 	}
+
 	if u.Status != "success" {
 		return nil, errors.New("blockr returns " + u.Message)
-
 	}
+
 	return hex.DecodeString(u.Data)
 }
 
@@ -133,48 +127,54 @@ func (b *BlockrService) GetUTXO(addr string, key *Key) (UTXOs, error) {
 		btc = "btc"
 	}
 
-	resp, err := http.Get("http://" + btc + ".blockr.io/api/v1/address/unspent/" + addr)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	body, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
 	var u unspent
-	err = json.Unmarshal(body, &u)
-	if err != nil {
+	if err := getJson("http://"+btc+".blockr.io/api/v1/address/unspent/"+addr, &u); err != nil {
 		return nil, err
 	}
+
 	if u.Status != "success" {
 		return nil, errors.New("blockr returns " + u.Message)
 	}
 
 	utxos := make(UTXOs, 0, len(u.Data.Unspent))
 	for _, tx := range u.Data.Unspent {
-		utxo := UTXO{}
-		utxo.Addr = addr
+		utxo := UTXO{
+			Addr:  addr,
+			Index: uint32(tx.N),
+			Age:   uint64(tx.Confirmations),
+			Key:   key,
+		}
+
 		amount, err := strconv.ParseFloat(tx.Amount, 64)
 		if err != nil {
 			return nil, err
 		}
 		utxo.Amount = uint64(amount * BTC)
-		utxo.Hash, err = hex.DecodeString(tx.Tx)
-		if err != nil {
+
+		if utxo.Hash, err = hex.DecodeString(tx.Tx); err != nil {
 			return nil, err
 		}
-		utxo.Index = uint32(tx.N)
-		utxo.Script, err = hex.DecodeString(tx.Script)
-		if err != nil {
+
+		if utxo.Script, err = hex.DecodeString(tx.Script); err != nil {
 			return nil, err
 		}
-		utxo.Age = uint64(tx.Confirmations)
-		utxo.Key = key
+
 		utxos = append(utxos, &utxo)
 	}
+
 	if key != nil {
 		cacheUTXO[addr] = utxos
 	}
+
 	return utxos, nil
+}
+
+func getJson(url string, target interface{}) error {
+	r, err := http.Get(url)
+	if err != nil {
+		return err
+	}
+	defer r.Body.Close()
+
+	return json.NewDecoder(r.Body).Decode(target)
 }
